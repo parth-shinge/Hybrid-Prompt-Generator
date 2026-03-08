@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: Hybrid Prompt Generator
+message: If you use this software, please cite the associated research paper.
+type: software
+
+authors:
+  - family-names: Shinge
+    given-names: Parth
+    orcid: https://orcid.org/0009-0007-3790-2373
+
+repository-code: https://github.com/parth-shinge/Hybrid-Prompt-Generator
+
+preferred-citation:
+  type: paper-conference
+  authors:
+    - family-names: Shinge
+      given-names: Parth
+  title: A Hybrid Framework for Adaptive Prompt Generation Using Templates, LLMs, and Learned Rankers
+  conference: 10th International Conference on Information and Communication Technology for Competitive Strategies (ICTCS-2025)
+  publisher: Springer Nature
+  year: 2026
+  collection-title: ICT Applications and Social Interfaces

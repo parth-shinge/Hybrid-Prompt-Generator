@@ -1,0 +1,83 @@
+# ============================================================
+# config.yaml — Central hyperparameter & path configuration
+# Paper: "A Hybrid Framework for Adaptive Prompt Generation
+#         Using Templates, LLMs, and Learned Rankers"
+# ============================================================
+
+seed: 42
+cv_folds: 5
+test_split: 0.2
+
+# --- Ranker selection ---
+# Options: "neural", "tfidf", "embedding"
+ranker:
+  type: neural
+  save_path: ranker.pkl
+
+# --- Neural ranker (Phase 2 architecture) ---
+neural_ranker:
+  embed_model: all-MiniLM-L6-v2
+  embed_dim: 384
+  hidden_1: 128
+  hidden_2: 64
+  dropout: 0.2
+  lr: 0.001
+  batch_size: 32
+  epochs: 100
+  patience: 10
+
+# --- TF-IDF ranker ---
+tfidf_ranker:
+  max_features: 5000
+  ngram_range: [1, 2]
+  solver: liblinear
+  max_iter: 2000
+
+# --- Embedding (logistic) ranker ---
+embedding_ranker:
+  embed_model: all-MiniLM-L6-v2
+  solver: liblinear
+  max_iter: 2000
+
+# --- Paths ---
+paths:
+  experiments_dir: experiments
+  models_dir: models
+  data_dir: data/processed
+  dataset_file: data/processed/dataset.csv
+  artifacts_dir: artifacts
+  results_dir: results
+
+# --- Evaluation protocol (Phase 3) ---
+evaluation:
+  cv_folds: 5
+  test_split: 0.2
+  models:
+    - random
+    - popularity
+    - tfidf_lr
+    - embedding_lr
+    - neural
+
+# --- Statistical significance (Phase 4) ---
+statistical_tests:
+  bootstrap_iterations: 1000
+  confidence_level: 0.95
+  reference_model: neural
+  comparison_models:
+    - tfidf_lr
+    - embedding_lr
+
+# --- Ensemble prompt synthesis (Phase 5) ---
+ensemble:
+  alpha: 0.6          # weight for slot coverage
+  beta: 0.4           # weight for fluency
+  min_length: 50      # minimum prompt length for full length score
+  max_length: 500     # maximum prompt length for full length score
+  log_scores: true    # log per-candidate scores to artifacts/
+
+# --- SHAP Interpretability (Phase 6) ---
+shap:
+  background_samples: 50       # background samples for SHAP explainer
+  max_display_dims: 20         # max embedding dimensions to display
+  model_path: models/neural_ranker_best.pt
