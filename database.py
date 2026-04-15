@@ -3,7 +3,7 @@ from sqlalchemy import (
     func, desc
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import hashlib
 from typing import List, Tuple
@@ -24,7 +24,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
 
     role = Column(String, default="user", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now(timezone.utc))
 
     prompts = relationship("Prompt", back_populates="user")
     feedbacks = relationship("Feedback", back_populates="user")
@@ -46,7 +46,7 @@ class Prompt(Base):
     generated_text = Column(Text, nullable=False)
     model_used = Column(String, nullable=False)  # 'offline' or 'gemini'
     used_hybrid = Column(Boolean, default=False, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.now(timezone.utc))
 
     user_id = Column(Integer, ForeignKey("users.id"))
     user = relationship("User", back_populates="prompts")
@@ -58,7 +58,7 @@ class Feedback(Base):
     id = Column(Integer, primary_key=True, index=True)
     rating = Column(Integer, nullable=False)  # 1 = thumbs up, 0 = thumbs down
     comments = Column(Text, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.now(timezone.utc))
 
     user_id = Column(Integer, ForeignKey("users.id"))
     prompt_id = Column(Integer, ForeignKey("prompts.id"))
@@ -79,7 +79,7 @@ class Choice(Base):
     gemini_prompt_id = Column(Integer, ForeignKey("prompts.id"), nullable=False)
     chosen_prompt_id = Column(Integer, ForeignKey("prompts.id"), nullable=False)
     chosen_model = Column(String, nullable=False)  # 'offline' or 'gemini'
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.now(timezone.utc))
 
     user = relationship("User", back_populates="choices")
     # relationships to Prompt are accessible via session.get if needed
@@ -178,6 +178,8 @@ def change_password(username: str, old_password: str, new_password: str):
 # ==== Recording Choices / building ranker dataset ====
 def record_choice(user_id: int, offline_prompt_id: int, gemini_prompt_id: int, chosen_prompt_id: int, chosen_model: str):
     """Insert a Choice row linking the two variants and the selected prompt/model."""
+    if user_id is None:
+        return False, "no_user"
     with SessionLocal() as session:
         # validate
         offline = session.get(Prompt, offline_prompt_id)

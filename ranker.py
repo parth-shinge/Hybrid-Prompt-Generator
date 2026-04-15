@@ -15,9 +15,8 @@ from typing import List, Tuple, Dict, Any, Union
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_val_score, StratifiedKFold, cross_validate
+from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
 import numpy as np
 
 try:
@@ -324,10 +323,13 @@ def predict_with_ranker(text: Union[str, List[str]], ranker_path: str = "ranker.
         if not _HAS_ST:
             return None, "embedding_unavailable"
         emname = payload["embed_model_name"]
-        embedder = SentenceTransformer(emname)
+        embedder = _load_embedder(emname)
         clf = payload["model"]
         scaler = payload["scaler"]
-        emb = embedder.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+        if hasattr(embedder, "encode"):
+            emb = embedder.encode(texts, convert_to_numpy=True, show_progress_bar=False)
+        else:
+            emb = embedder(texts)
         embs = scaler.transform(emb)
         probs_list = clf.predict_proba(embs)
         classes = clf.classes_

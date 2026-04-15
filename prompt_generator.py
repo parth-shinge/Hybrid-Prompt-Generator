@@ -2,10 +2,12 @@ import streamlit as st
 import requests
 import hashlib
 import hmac
+import json
 import random
 import matplotlib.pyplot as plt
 import time
 import math
+import os
 from sqlalchemy import select
 
 import pandas as pd
@@ -47,15 +49,7 @@ try:
     GEMINI_REQUEST_TIMEOUT = float(_gt) if _gt is not None else 30.0
 except Exception:
     GEMINI_REQUEST_TIMEOUT = 30.0
-try:
-    _gr = st.secrets.get("GEMINI_MAX_RETRIES", None)
-    GEMINI_MAX_RETRIES = int(_gr) if _gr is not None else 2
-except Exception:
-    GEMINI_MAX_RETRIES = 2
 
-# Increase default retries slightly to handle transient 5xx/503 errors
-if GEMINI_MAX_RETRIES < 3:
-    GEMINI_MAX_RETRIES = 3
 ADMIN_USERNAME = st.secrets.get("ADMIN_USERNAME", None)
 ADMIN_PW_SALT = st.secrets.get("ADMIN_PW_SALT", None)
 ADMIN_PW_HASH = st.secrets.get("ADMIN_PW_HASH", None)
@@ -65,12 +59,9 @@ RANKER_PATH = "ranker.pkl"
 # helpers
 def safe_rerun():
     try:
-        st.experimental_rerun()
+        st.rerun()
     except Exception:
-        try:
-            st.rerun()
-        except Exception:
-            pass
+        pass
 
 
 def _clear_generation_state():
@@ -124,6 +115,28 @@ def generate_template_prompt(tool, content_type, topic, style, platform=None, co
     return f"Create a {style} {content_type} about {topic}."
 
 
+def _log_gemini_error(error_type, attempt, **extra):
+    """Append a structured JSON line to the Gemini error log."""
+    import datetime
+    try:
+        os.makedirs("artifacts", exist_ok=True)
+        entry = {
+            "ts": datetime.datetime.utcnow().isoformat() + "Z",
+            "type": error_type,
+            "attempt": attempt,
+            **extra,
+        }
+        with open(os.path.join("artifacts", "gemini_errors.log"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+# Maximum retries and exponential backoff base for Gemini calls
+_GEMINI_MAX_RETRIES = 3
+_GEMINI_BACKOFF_BASE = 1  # seconds — gives 1s, 2s, 4s
+
+
 def generate_gemini_prompt(tool, content_type, topic, style, platform=None, color_palette=None, mood=None):
     if not GEMINI_API_KEY:
         return "Gemini API key not configured."
@@ -146,99 +159,75 @@ def generate_gemini_prompt(tool, content_type, topic, style, platform=None, colo
     headers = {"Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY}
     payload = {"contents": [{"parts": [{"text": user_msg}]}]}
 
-    # Respect configured rate limit and retry on transient network errors/timeouts
-    attempt = 0
-    last_exception = None
-    # ensure artifacts folder for logging
-    try:
-        import os
-        os.makedirs("artifacts", exist_ok=True)
-    except Exception:
-        pass
-    while attempt < GEMINI_MAX_RETRIES:
-        attempt += 1
-        if attempt > 1:
-            # backoff before retry
-            # jittered exponential backoff with capped wait
-            base = GEMINI_RATE_LIMIT_SECONDS + (2 ** (attempt - 1))
-            jitter = random.uniform(0.8, 1.2)
-            wait = min(base * jitter, 60)
-            time.sleep(wait)
+    def _fallback(reason):
+        """Return the offline template with a prefixed warning."""
+        tpl = generate_template_prompt(tool, content_type, topic, style, platform, color_palette, mood)
+        return f"⚠️ {reason}; showing offline template instead:\n\n" + tpl
 
+    last_exception = None
+
+    for attempt in range(1, _GEMINI_MAX_RETRIES + 1):
+        # Exponential backoff before retries: 1s, 2s, 4s
+        if attempt > 1:
+            backoff = _GEMINI_BACKOFF_BASE * (2 ** (attempt - 2))
+            time.sleep(backoff)
+
+        # Rate-limit pause before every request
         time.sleep(GEMINI_RATE_LIMIT_SECONDS)
+
+        # ---- Network-level errors ----
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=GEMINI_REQUEST_TIMEOUT)
         except requests.exceptions.Timeout as e:
             last_exception = e
-            # record timeout into log
-            try:
-                import json, datetime
-                with open("artifacts/gemini_errors.log", "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"ts": datetime.datetime.utcnow().isoformat() + "Z", "type": "timeout", "attempt": attempt, "timeout": GEMINI_REQUEST_TIMEOUT}) + "\n")
-            except Exception:
-                pass
-            # try again unless we've exhausted retries
-            if attempt >= GEMINI_MAX_RETRIES:
-                fallback = generate_template_prompt(tool, content_type, topic, style, platform, color_palette, mood)
-                return f"⚠️ Gemini request timed out after {GEMINI_REQUEST_TIMEOUT}s (attempts={attempt}); showing offline template instead:\n\n" + fallback
+            _log_gemini_error("timeout", attempt, timeout=GEMINI_REQUEST_TIMEOUT)
+            if attempt >= _GEMINI_MAX_RETRIES:
+                return _fallback(f"Gemini request timed out after {GEMINI_REQUEST_TIMEOUT}s (attempts={attempt})")
             continue
         except requests.exceptions.RequestException as e:
             last_exception = e
-            # log request exception
-            try:
-                import json, datetime
-                with open("artifacts/gemini_errors.log", "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"ts": datetime.datetime.utcnow().isoformat() + "Z", "type": "request_exception", "attempt": attempt, "error": str(e)}) + "\n")
-            except Exception:
-                pass
-            if attempt >= GEMINI_MAX_RETRIES:
-                fallback = generate_template_prompt(tool, content_type, topic, style, platform, color_palette, mood)
-                return f"⚠️ Gemini request failed ({e}); showing offline template instead:\n\n" + fallback
+            _log_gemini_error("request_exception", attempt, error=str(e))
+            if attempt >= _GEMINI_MAX_RETRIES:
+                return _fallback(f"Gemini request failed ({e})")
             continue
 
-        # got a response; parse it
+        # ---- Parse response body ----
         try:
             data = resp.json()
         except Exception:
             data = resp.text
 
-        # transient server errors — retry
+        # ---- Transient server errors (502/503/504) — retry ----
         if resp.status_code in (502, 503, 504):
             last_exception = Exception(f"HTTP {resp.status_code}")
-            try:
-                import json, datetime
-                body_preview = resp.text[:400]
-                with open("artifacts/gemini_errors.log", "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"ts": datetime.datetime.utcnow().isoformat() + "Z", "type": "http_5xx", "attempt": attempt, "status": resp.status_code, "body_preview": body_preview}) + "\n")
-            except Exception:
-                pass
-            if attempt >= GEMINI_MAX_RETRIES:
-                fallback = generate_template_prompt(tool, content_type, topic, style, platform, color_palette, mood)
-                return f"⚠️ Gemini returned HTTP {resp.status_code}; showing offline template instead:\n\n" + fallback
+            _log_gemini_error("http_5xx", attempt, status=resp.status_code,
+                              body_preview=resp.text[:400])
+            if attempt >= _GEMINI_MAX_RETRIES:
+                return _fallback(f"Gemini returned HTTP {resp.status_code} after {attempt} attempts")
             continue
 
+        # ---- Rate-limit (429) — non-retriable, immediate fallback ----
         if resp.status_code == 429 or (isinstance(data, dict) and data.get("error", {}).get("code") == 429):
-            fallback = generate_template_prompt(tool, content_type, topic, style, platform, color_palette, mood)
+            _log_gemini_error("http_429", attempt, status=429,
+                              body_preview=resp.text[:400])
             detail = data.get("error", {}).get("message") if isinstance(data, dict) else None
-            if detail:
-                return f"⚠️ Gemini free-tier quota exceeded (HTTP 429): {detail}; showing offline template instead:\n\n" + fallback
-            return "⚠️ Gemini free-tier quota exceeded; showing offline template instead:\n\n" + fallback
+            suffix = f": {detail}" if detail else ""
+            return _fallback(f"Gemini free-tier quota exceeded (HTTP 429){suffix}")
 
+        # ---- Other HTTP errors — non-retriable ----
         if not resp.ok:
-            # non-retriable error — return it
-            try:
-                import json, datetime
-                body_preview = resp.text[:400]
-                with open("artifacts/gemini_errors.log", "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps({"ts": datetime.datetime.utcnow().isoformat() + "Z", "type": "http_error", "status": resp.status_code, "body_preview": body_preview}) + "\n")
-            except Exception:
-                pass
+            _log_gemini_error("http_error", attempt, status=resp.status_code,
+                              body_preview=resp.text[:400])
             return f"Gemini API error: HTTP {resp.status_code} - {data}"
 
+        # ---- Success ----
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception:
             return f"Unexpected response format: {data}"
+
+    # Should not reach here, but safety fallback
+    return _fallback(f"Gemini call exhausted {_GEMINI_MAX_RETRIES} retries (last error: {last_exception})")
 
 
 def test_gemini_key_once(timeout_override: float | None = None):
@@ -393,6 +382,7 @@ def show_dashboard():
         ax.set_title("Top Topics")
         ax.tick_params(axis="x", rotation=45)
         st.pyplot(fig)
+        plt.close(fig)
     else:
         st.info("No prompt data for topics yet.")
 
@@ -405,6 +395,7 @@ def show_dashboard():
         ax.set_title("Top Styles")
         ax.tick_params(axis="x", rotation=45)
         st.pyplot(fig)
+        plt.close(fig)
     else:
         st.info("No prompt data for styles yet.")
 
@@ -460,7 +451,6 @@ def show_dashboard():
         # Show recent Gemini errors (if any)
         with st.expander("Recent Gemini errors (last 10)", expanded=False):
             try:
-                import os, json
                 log_path = os.path.join("artifacts", "gemini_errors.log")
                 if os.path.exists(log_path):
                     lines = open(log_path, "r", encoding="utf-8").read().splitlines()
@@ -513,13 +503,13 @@ def admin_panel():
             )
 
             # Check for cached results
-            import json as _json
+
             cached_global = None
             global_path = os.path.join("results", "shap_global.json")
             if os.path.exists(global_path):
                 try:
                     with open(global_path, "r", encoding="utf-8") as _f:
-                        cached_global = _json.load(_f)
+                        cached_global = json.load(_f)
                 except Exception:
                     pass
 
@@ -532,6 +522,7 @@ def admin_panel():
                     from shap_explain import plot_global_importance
                     fig = plot_global_importance(cached_global)
                     st.pyplot(fig)
+                    plt.close(fig)
                 except Exception as e:
                     st.error(f"Error plotting: {e}")
 
@@ -556,6 +547,7 @@ def admin_panel():
                             )
                             fig = plot_global_importance(result)
                             st.pyplot(fig)
+                            plt.close(fig)
 
                             with st.expander("Raw top dimensions", expanded=False):
                                 st.json(result["top_dims"])
@@ -598,6 +590,7 @@ def admin_panel():
 
                             fig = plot_local_explanation(pred)
                             st.pyplot(fig)
+                            plt.close(fig)
 
                             with st.expander("Top contributing dimensions", expanded=False):
                                 st.json(pred["top_contributions"])
@@ -612,7 +605,7 @@ def admin_panel():
                 with st.expander("Last saved local explanation (shap_local.json)", expanded=False):
                     try:
                         with open(local_path, "r", encoding="utf-8") as _f:
-                            st.json(_json.load(_f))
+                            st.json(json.load(_f))
                     except Exception:
                         st.info("Could not load cached results.")
 
@@ -685,7 +678,7 @@ def admin_panel():
                 st.error("Enter at least one topic (one per line).")
             else:
                 created = 0
-                import json, datetime, os
+                import datetime
                 os.makedirs("artifacts", exist_ok=True)
                 pairs_path = os.path.join("artifacts", "hybrid_pairs.jsonl")
                 for topic in lines:
@@ -719,7 +712,7 @@ def admin_panel():
             st.warning("No users exist to attribute choices to. Create users first or attribute choices to an existing user.")
 
         # read pending pairs
-        import json, os
+
         pairs_path = os.path.join("artifacts", "hybrid_pairs.jsonl")
         pending = []
         if os.path.exists(pairs_path):
@@ -786,7 +779,7 @@ def admin_panel():
                 except Exception as e:
                     # Log the error for later inspection and surface a friendly message
                     try:
-                        import json, datetime, os
+                        import datetime
                         os.makedirs("artifacts", exist_ok=True)
                         with open("artifacts/ranker_errors.log", "a", encoding="utf-8") as fh:
                             fh.write(json.dumps({"ts": datetime.datetime.utcnow().isoformat() + "Z", "error": str(e)}) + "\n")
@@ -864,10 +857,10 @@ def admin_panel():
                         ax.set_ylim(0, 1)
                         ax.set_ylabel(f"Mean CV {selected_metric}")
                         st.pyplot(fig)
+                        plt.close(fig)
 
                     # Build a per-model metric breakdown table
                     try:
-                        import json
                         rows = []
                         for k, v in results.items():
                             row = {"model": k}
@@ -954,7 +947,7 @@ def admin_panel():
 
 def _mark_pair_labeled(pairs_path: str, offline_id: int, gemini_id: int, chosen_id: int, chosen_model: str, user_id: int):
     # read all, update matching pair
-    import json
+
     lines = []
     try:
         with open(pairs_path, "r", encoding="utf-8") as fh:
@@ -1073,6 +1066,26 @@ def run_prompt_generator():
     model_choice = st.selectbox("Model choice:", ["Offline", "Gemini", "Hybrid"], key="model_choice_select", on_change=_on_global_change)
     tool = st.selectbox("Choose a tool:", ["Gamma", "Canva"], key="tool_select", on_change=_on_global_change)
 
+    # ── Reset form inputs when the selected tool changes ──
+    if "last_tool" not in st.session_state:
+        st.session_state.last_tool = tool
+    if st.session_state.last_tool != tool:
+        _form_input_keys = [
+            "content_type_input",
+            "topic_input",
+            "style_input",
+            "canva_platform",
+            "canva_colors",
+            "canva_mood",
+            "gen_both_checkbox",
+        ]
+        for key in _form_input_keys:
+            if key in st.session_state:
+                del st.session_state[key]
+        _clear_generation_state()
+        st.session_state.last_tool = tool
+        st.rerun()
+
     tab1, tab2 = st.tabs(["✨ Generate Prompt", "📂 Search History"])
 
     # Generate tab
@@ -1082,7 +1095,7 @@ def run_prompt_generator():
             return
 
         st.subheader("✨ Generate a New Prompt")
-        with st.form("generate_form", clear_on_submit=True):
+        with st.form("generate_form", clear_on_submit=False):
             content_type = st.text_input("Content type (e.g. presentation, infographic, poster):", key="content_type_input")
             topic = st.text_input("Topic:", key="topic_input")
             style = st.text_input("Style (e.g. modern, playful, minimalist):", key="style_input")
@@ -1235,7 +1248,7 @@ def run_prompt_generator():
                 else:
                     actual = model_choice.lower()
 
-                if model_choice != "Hybrid":
+                if model_choice != "Hybrid" and not used_hybrid_flag:
                     if actual == "gemini":
                         prompt_text = generate_gemini_prompt(tool, content_type, topic, style, platform, color_palette, mood)
                         model_used = "gemini"
