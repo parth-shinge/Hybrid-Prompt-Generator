@@ -1,4 +1,4 @@
-# 🚀 Hybrid Prompt Generator (Hackathon Prototype)
+# 🚀 Hybrid Prompt Generator
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen)
