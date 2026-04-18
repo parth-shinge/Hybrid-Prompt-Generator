@@ -3,49 +3,28 @@
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![Tests](https://img.shields.io/badge/tests-111%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Conference](https://img.shields.io/badge/ICTCS-2025-orange)
 ![GitHub stars](https://img.shields.io/github/stars/parth-shinge/Hybrid-Prompt-Generator?style=social)
 
-> **AI-powered system for generating high-quality prompts using hybrid intelligence and user feedback**
+> **Official Implementation of the Research Paper**
+> *A Hybrid Framework for Adaptive Prompt Generation Using Templates, LLMs, and Learned Rankers*
+
+📖 Published in **ICT: Applications and Social Interfaces — Proceedings of ICTCS 2025, Volume 3 (Springer LNNS)**
 
 🔗 Repository:
 https://github.com/parth-shinge/Hybrid-Prompt-Generator
 
 ---
 
-## 🏆 Project Context
+# 🧠 Overview
 
-This project is being developed and presented as part of a hackathon.
+Hybrid Prompt Generator is a research-driven framework that combines **template-based prompt generation**, **LLM augmentation**, and **machine learning ranking models** to generate high-quality prompts for creative tools such as **Canva, Gamma, and other AI design platforms**.
 
-The goal is to build a smart prompt generation system that:
-
-* Improves AI output quality
-* Learns from user behavior
-* Adapts over time
-
-This version focuses on:
-
-* A working prototype
-* Real-time prompt generation
-* Intelligent ranking and selection
-* Scalability and real-world application
+The system integrates **Human-in-the-Loop learning**, enabling the model to continuously improve prompt quality based on user selections.
 
 ---
 
-## 🧠 Overview
-
-Hybrid Prompt Generator is an AI-based system that combines:
-
-* Template-based prompt generation
-* LLM-powered generation (Gemini)
-* Machine learning-based ranking
-
-to generate high-quality prompts for tools like **Canva, Gamma, and ChatGPT**.
-
-The system uses **Human-in-the-Loop learning**, meaning it improves continuously based on user selections.
-
----
-
-## 🏗 System Architecture
+# 🏗 System Architecture
 
 ```
 User Input
@@ -71,96 +50,136 @@ User Input
    📊 Dataset Creation
          │
          ▼
-   🔁 Continuous Learning Loop
+   📈 Evaluation + Statistical Testing
          │
          ▼
-   🔍 Explainability Layer (SHAP)
+   🔍 SHAP Interpretability
 ```
 
 ---
 
-## ✨ Key Features
+# ✨ Key Features
 
-### ⚡ Hybrid Prompt Generation
+### 🧩 Template Prompt Generator
 
-Combines template-based and AI-generated prompts to produce better results.
+Deterministic prompt construction using **7 structured design parameters**.
 
-### 🧠 Neural Ranking Model
+### 🤖 Gemini Integration
 
-Learns user preferences and selects the best prompt automatically.
+LLM-powered prompt generation using **Google Gemini API**.
 
-### 👤 Human-in-the-Loop Learning
+### ⚡ Hybrid Generation Mode
 
-Every user choice improves the system over time.
+Generates prompts from both systems and selects the best automatically.
 
-### 📊 Ensemble Scoring
+### 🧠 Ensemble Prompt Synthesis
 
-Evaluates prompt quality using:
+Prompt quality scoring:
 
 ```
 Final Score = α × SlotCoverage + β × Fluency
 ```
 
-### 🔍 Explainability
+### 📊 Neural Ranker
 
-Provides insights into why a prompt was selected.
+Binary classifier trained on **user choice data**.
 
----
+Architecture:
 
-## 🖥 Working Prototype
+```
+Embedding (384)
+ → Linear(128)
+ → ReLU
+ → Dropout(0.2)
+ → Linear(64)
+ → ReLU
+ → Linear(1)
+ → Sigmoid
+```
 
-* ✅ Fully functional Streamlit application
-* ✅ Supports multiple tools (Canva, Gamma, etc.)
-* ✅ Hybrid generation (Template + AI)
-* ✅ Intelligent prompt selection
-* ✅ Real-time user interaction
-
----
-
-## 📊 Technical Approach
-
-* **Frontend:** Streamlit
-* **Backend:** Python
-* **LLM Integration:** Gemini API
-* **Embeddings:** Sentence Transformers
-* **Model:** Neural Network (MLP)
-* **Database:** SQLite
-* **Explainability:** SHAP
+Embedding model: **all-MiniLM-L6-v2**
 
 ---
 
-## 💼 Business & Impact
+# 👤 Human-in-the-Loop Learning
 
-### 🚀 Use Cases
+User selections are logged into a **SQLite database**, which is converted into a dataset for training the neural ranker.
 
-* Students & educators
-* Content creators
-* Marketers & designers
-
-### 💡 Value
-
-* Reduces time spent writing prompts
-* Improves AI-generated content quality
-* Makes AI tools easier to use for non-experts
-
-### 💰 Potential
-
-* SaaS platform
-* API for AI tools
-* Integration with design and productivity tools
+The system continuously improves as more user feedback is collected.
 
 ---
 
-## 🌍 SDG Alignment
+# 📊 Evaluation Protocol
 
-* 🎓 **Quality Education (SDG 4)** — helps students create better content
-* 💼 **Decent Work (SDG 8)** — empowers creators and freelancers
-* 🏭 **Industry & Innovation (SDG 9)** — builds smarter AI systems
-* 🌐 **Reduced Inequalities (SDG 10)** — makes AI accessible to everyone
+The repository includes a full ML evaluation pipeline.
+
+### Models Compared
+
+• Random Baseline
+• Popularity Baseline
+• TF-IDF + Logistic Regression
+• Embedding + Logistic Regression
+• Neural Ranker
+
+### Metrics
+
+• Accuracy
+• Precision
+• Recall
+• F1 Score
+• ROC-AUC
+
+Evaluation uses:
+
+• **5-Fold Stratified Cross Validation**
+• **Held-out Test Set**
 
 ---
 
-## ▶️ Running the Application
+# 📈 Statistical Significance Testing
+
+To validate experimental results, the following statistical tests are implemented:
+
+🧪 McNemar Test
+🧪 Wilcoxon Signed-Rank Test
+🧪 Bootstrap Confidence Intervals
+
+Results saved to:
+
+```
+results/statistical_tests.json
+```
+
+---
+
+# 🔍 SHAP Interpretability
+
+To improve transparency, the neural ranker supports explainability using **SHAP**.
+
+### Global Explanations
+
+Feature importance across the dataset.
+
+### Local Explanations
+
+Explains **why the model preferred one prompt over another**.
+
+Accessible via the **Admin Dashboard**.
+
+---
+
+# 🖥 Admin Dashboard
+
+The admin panel provides:
+
+📊 System analytics
+🧠 Ranker retraining
+🔍 SHAP visualization
+🗃 Dataset inspection
+
+---
+
+# ⚙️ Installation
 
 ```bash
 git clone https://github.com/parth-shinge/Hybrid-Prompt-Generator
@@ -173,13 +192,35 @@ source .venv/bin/activate
 # Windows: .venv\Scripts\activate
 
 pip install -r requirements.txt
+```
 
+---
+
+# ▶️ Running the Application
+
+```bash
 streamlit run prompt_generator.py
 ```
 
 ---
 
-## 📂 Project Structure
+# 🧠 Training the Neural Ranker
+
+```python
+from neural_ranker import train_ranker
+from database import get_choice_dataset
+
+pairs = get_choice_dataset()
+
+texts = [t for t,l in pairs]
+labels = [l for t,l in pairs]
+
+train_ranker(texts, labels)
+```
+
+---
+
+# 📂 Project Structure
 
 ```
 Hybrid-Prompt-Generator/
@@ -194,17 +235,72 @@ Hybrid-Prompt-Generator/
 ├── config.yaml
 │
 ├── tests/
-├── utils/
+├── results/
+├── models/
+└── utils/
 ```
 
 ---
 
-## 🔁 Continuous Improvement
+# 🔁 Reproducibility
 
-The system improves through:
+The project ensures reproducible experiments through:
 
-* User interaction data
-* Model retraining
-* Adaptive ranking
+• Deterministic seeding
+• Dataset hashing
+• Experiment tracking
+• Git commit logging
+• Config-based hyperparameters
 
-Making it a **learning system, not a static tool**.
+Each experiment logs:
+
+```
+dataset hash
+git commit
+random seed
+config snapshot
+timestamp
+```
+
+---
+
+# 📜 Citation
+
+If you use this work in your research, please cite the following:
+
+### BibTeX
+
+```bibtex
+@inproceedings{shinge2026hybridprompt,
+  title     = {A Hybrid Framework for Adaptive Prompt Generation Using Templates, LLMs, and Learned Rankers},
+  author    = {Parth Shinge},
+  booktitle = {ICT: Applications and Social Interfaces},
+  series    = {Lecture Notes in Networks and Systems},
+  publisher = {Springer Nature Switzerland AG},
+  year      = {2026},
+  note      = {Proceedings of the 10th International Conference on Information and Communication Technology for Competitive Strategies (ICTCS-2025)}
+}
+```
+
+### Author
+
+Parth Shinge
+Vishwakarma Institute of Technology, Pune, India
+
+ORCID: https://orcid.org/0009-0007-3790-2373
+
+---
+
+# ⭐ Acknowledgement
+
+This work was presented at:
+
+**10th International Conference on Information and Communication Technology for Competitive Strategies (ICTCS-2025)**
+
+and published in **Springer Lecture Notes in Networks and Systems (LNNS)**.
+
+---
+
+# 📜 License
+
+This repository is released for **academic and research purposes**.
